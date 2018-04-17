@@ -1,0 +1,321 @@
+---
+title: "wk3-bayes-hw"
+author: "kenwan cheung"
+date: "4/13/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Use formulas to calculate parameters of beta distribution from mode and concentration:
+
+α=ω(κ−2)+1,  
+β=(1−ω)(κ−2)+1,
+κ>2.
+
+```{r}
+
+o = .05
+kappa = 100
+a = o*(kappa-2)+1
+b = (1-o)*(kappa-2)+1
+
+c(a=a,b=b)
+
+```
+
+Shapes
+
+```{r}
+
+x<-seq(from=0,to=1,by=.001)
+priorBetaDens<-dbeta(x,shape1=a,shape2=b)
+
+x[which.max(priorBetaDens)]
+
+plot(x,priorBetaDens,type="l",lwd=3)
+abline(v=.05)
+```
+
+Sample - hgher than 5% in sample. but somewhere in between "compromise between"
+
+```{r}
+(smple<-c(rep(0,times=92),rep(1,times=8)))
+
+(k<-sum(smple))
+
+(s<-length(smple))
+
+```
+
+Posterior
+
+```{r}
+
+postA = k + a
+postB = s - k + b
+
+c(postA=postA,postB=postB)
+
+posteriorBetaDens<-dbeta(x,shape1=postA,shape2=postB)
+
+x[which.max(posteriorBetaDens)]
+
+plot(x,priorBetaDens,type='l',lwd=3,col='blue',ylim=c(0,25),xlim=c(0,.2))
+lines(x,posteriorBetaDens,lwd=3,col='orange')
+legend("topright",legend=c("prior","posterior"),col=c("blue","orange"),lwd=3)
+
+```
+
+moments
+
+```{r}
+
+(muPosterior=postA/(postA+postB))
+(varPosterior=(postA*postB)/((postA+postB)^2*(postA+postB+1)))
+
+(kappaPosterior<-postA+postB)
+
+```
+
+
+part 4
+
+```{r}
+
+#prior of density beta * conditional prob given.
+jointPrior<-function(theta,omega,A_omega,B_omega,K){
+  res<-dbeta(omega,A_omega,B_omega)*dbeta(theta,omega*(K-2)+1,(1-omega)*(K-2)+1)
+  res
+}
+```
+
+Step 5
+
+posterior mean
+
+```{r}
+
+(muPosterior = postA /(postA+postB))
+(varPosterior =postA*postB/((postA+postB)^2*(postA+postB+1)))
+((kappaPosterior<-postA+postB))
+
+```
+
+
+# sNow we can move onto last part of the workshop.
+
+```{r}  
+
+Omega<-Theta<-seq( 0 , 1 , length=101 )
+plot(Omega,dbeta(Omega,2,2))
+
+A_omega<-2
+B_omega<-2
+K<-100
+
+jointPrior<-function(theta,omega,A_omega,B_omega,K){
+  res<-dbeta(omega,A_omega,B_omega)*dbeta(theta,omega*(K-2)+1,(1-omega)*(K-2)+1)
+  res
+}
+
+dens<-expand.grid(Omega,Theta)
+
+colnames(dens)<-c("Omega","Theta")
+
+dens$Prior<-apply(dens,1,function(z) jointPrior(z[1],z[2],A_omega,B_omega,K))
+
+Prior.theta.omega<-matrix(dens$Prior,101,101)
+Prior.theta.omega<-Prior.theta.omega/sum(Prior.theta.omega) #Joint prior
+
+Prior.omega.marginal<-apply(Prior.theta.omega,2,sum)
+Prior.omega.marginal<-Prior.omega.marginal/sum(Prior.omega.marginal)*100 #Omega marginal prior
+matplot(Omega,cbind(Prior.omega.marginal,dbeta(Omega,A_omega,B_omega)),type="l",ylab="Marginal p(omega)")
+
+
+Prior.theta.marginal<-apply(Prior.theta.omega,1,sum)
+Prior.theta.marginal<-Prior.theta.marginal/sum(Prior.theta.marginal)*100 #Theta marginal prior
+plot(Theta,Prior.theta.marginal,type="l",ylab="Marginal p(theta)")
+
+persp(Theta,Omega,Prior.theta.omega,d=1,theta=-25,phi=20,main="Joint Prior Distribution")
+
+
+contour(x=Omega,y=Theta,z=Prior.theta.omega,ylab="omega",xlab="theta",main="Joint Prior Distribution")
+
+
+```
+
+```{r}
+
+par(mfrow=c(3,1))
+Prior.theta.omega.25<-jointPrior(Theta,0.25,A_omega,B_omega,K)
+Prior.theta.omega.25<-Prior.theta.omega.25/sum(Prior.theta.omega.25)*100
+plot(Theta,Prior.theta.omega.25,type="l",ylab="p(theta|omega=0.25)",main="Marginal prior for Theta")
+Prior.theta.omega.5<-jointPrior(Theta,0.5,A_omega,B_omega,K)
+Prior.theta.omega.5<-Prior.theta.omega.5/sum(Prior.theta.omega.5)*100
+plot(Theta,jointPrior(Theta,0.5,A_omega,B_omega,K),type="l",ylab="p(theta|omega=0.5)")
+Prior.theta.omega.75<-jointPrior(Theta,0.75,A_omega,B_omega,K)
+Prior.theta.omega.75<-Prior.theta.omega.75/sum(Prior.theta.omega.75)*100
+plot(Theta,jointPrior(Theta,0.75,A_omega,B_omega,K),type="l",ylab="p(theta|omega=0.75)")
+
+
+par(mfrow=c(1,1))
+
+likeli<-function(theta,s,k){
+  theta^k*(1-theta)^(s-k)
+}
+likelihood<-likeli(Theta,12,9)
+plot(Theta,likelihood,type="l",ylab="p(y|theta)",main="Likelihood")
+
+Posterior<-apply(Prior.theta.omega,2,function(z) z*likelihood)
+Posterior<-Posterior/sum(Posterior)
+
+
+```
+
+# Now we can move onto the next section - the rest of the hw!
+
+In example from Section 5.1 of [G] the goal was estimation of the probability of tumor θ in a population of female laboratory rats of type “F344” that receive a zero dose of the drug (control group).
+
+In the experiment 4 out of 14 rats developed a tumor.
+
+```{r}
+
+Data<-c(s=14,k=4)
+
+```
+
+Select binomial model yi∼Binom(θ) with probability of tumor θ and beta prior distribution for the parameter θ∼Beta(α,β).
+
+Suppose we know from historical observation of population of “F344” the mean and the variance of beta distribution for θ.
+
+Using formulas in the interactive demonstration of beta distribution convert mean value μ=0.136 and standard deviation σ=0.1034 of observed empirical probabilities into shapes of beta distribution α,β.
+
+LLet's create a function to calculate parameters from a given mean and var
+
+```{r}
+
+estBetaParams <- function(mu, var) {
+  alpha <- ((1 - mu) / var - 1 / mu) * mu ^ 2
+  beta <- alpha * (1 / mu - 1)
+  return(params = list(alpha = alpha, beta = beta))
+}
+
+betaparam = estBetaParams(0.136,(0.1034)^2)
+
+```
+
+Now we can calculate the parameters of the poisterior distribution
+
+```{r}
+
+k = 4
+s = 14
+
+(postA = k + betaparam$alpha)
+(postB = s - k + betaparam$beta)
+
+
+```
+
+Compare prior and posterior distributions and explain the difference.
+
+```{r}
+rbind(cbind(betaparam$alpha,betaparam$beta),cbind(a=postA,b=postB))
+```
+
+Discussion:
+We now have more information with drastically different parameters and the posteriorrepresents the compromise between the weakish prior and posterior.
+
+Assume that probability of tumor θ in control group is concentrated around unknown mode ω of beta distribution with concentration level of 20 (κtheta).
+In addition
+ω∼Beta(Aω,Bω).
+
+Belief based on historical observations is that parameter ω has a tendency to be around 0.4 with concentration 12.
+
+Use grid approximation to find posterior distribution
+
+
+```{r}
+
+mode = .4
+K = 12
+
+(A_omega = mode*(K-2)+1)
+(B_omega = (1-mode)*(K-2)+1)
+
+```
+
+Now that we've initialized let's move on.
+
+```{r}  
+
+Omega<-Theta<-seq( 0 , 1 , length=13 )
+plot(Omega,dbeta(Omega,2,2))
+     
+dens<-expand.grid(Omega,Theta)
+
+colnames(dens)<-c("Omega","Theta")
+
+dens$Prior<-apply(dens,1,function(z) jointPrior(z[1],z[2],A_omega,B_omega,K))
+
+Prior.theta.omega<-matrix(dens$Prior,13,13)
+Prior.theta.omega<-Prior.theta.omega/sum(Prior.theta.omega) #Joint prior
+
+Prior.omega.marginal<-apply(Prior.theta.omega,2,sum)
+Prior.omega.marginal<-Prior.omega.marginal/sum(Prior.omega.marginal)*100 #Omega marginal prior
+matplot(Omega,cbind(Prior.omega.marginal,dbeta(Omega,A_omega,B_omega)),type="l",ylab="Marginal p(omega)")
+
+```
+
+Now we have our marginal prior.
+
+
+```{r}
+Prior.theta.marginal<-apply(Prior.theta.omega,1,sum)
+Prior.theta.marginal<-Prior.theta.marginal/sum(Prior.theta.marginal)*100 #Theta marginal prior
+plot(Theta,Prior.theta.marginal,type="l",ylab="Marginal p(theta)")
+
+persp(Theta,Omega,Prior.theta.omega,d=1,theta=-25,phi=20,main="Joint Prior Distribution")
+
+
+contour(x=Omega,y=Theta,z=Prior.theta.omega,ylab="omega",xlab="theta",main="Joint Prior Distribution")
+
+
+```
+
+Now we can look at our plots of marginal prior for THeta.
+
+```{r}
+
+par(mfrow=c(3,1))
+Prior.theta.omega.25<-jointPrior(Theta,0.25,A_omega,B_omega,K)
+Prior.theta.omega.25<-Prior.theta.omega.25/sum(Prior.theta.omega.25)*100
+plot(Theta,Prior.theta.omega.25,type="l",ylab="p(theta|omega=0.25)",main="Marginal prior for Theta")
+Prior.theta.omega.5<-jointPrior(Theta,0.5,A_omega,B_omega,K)
+Prior.theta.omega.5<-Prior.theta.omega.5/sum(Prior.theta.omega.5)*100
+plot(Theta,jointPrior(Theta,0.5,A_omega,B_omega,K),type="l",ylab="p(theta|omega=0.5)")
+Prior.theta.omega.75<-jointPrior(Theta,0.75,A_omega,B_omega,K)
+Prior.theta.omega.75<-Prior.theta.omega.75/sum(Prior.theta.omega.75)*100
+plot(Theta,jointPrior(Theta,0.75,A_omega,B_omega,K),type="l",ylab="p(theta|omega=0.75)")
+
+```
+
+Now let's look at our optimal theta by likelihood.It sits right underneath .3.
+
+```{r}
+par(mfrow=c(1,1))
+
+likeli<-function(theta,s,k){
+  theta^k*(1-theta)^(s-k)
+}
+likelihood<-likeli(Theta,14,4)
+plot(Theta,likelihood,type="l",ylab="p(y|theta)",main="Likelihood")
+
+Posterior<-apply(Prior.theta.omega,2,function(z) z*likelihood)
+Posterior<-Posterior/sum(Posterior)
+
+
+```

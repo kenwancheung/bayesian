@@ -1,0 +1,220 @@
+---
+title: "bayes-hw-wk2-kenwan"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(faraway)
+
+```
+
+## Wk2 - assignment. Posterior distribution for binomial.
+
+Repeat calculations of Section 5 of the workshop:
+
+Find posterior probability for binomial model with uniform prior and data. Use set.seed(81) for simulation of θ
+
+Set likelihood function for binom.
+
+```{r}
+
+likeli<-function(par,data){
+  sdata<-sum(data)
+  ldata<-length(data)
+  return(par^sdata*(1-par)^(ldata-sdata))
+}
+
+```
+
+Generate theta. Uniform - 1000 samples.
+
+```{r}
+
+set.seed(81)
+(data1<-rbinom(10,1,.71))
+
+Theta = seq( .00001 , 1 -.00001, length=1001 ) # Fine teeth for Theta.
+pTheta = rep(1,length(Theta))      # Uniform (horizontal) shape for pTheta.
+pTheta = pTheta/sum(pTheta)        # Make pTheta sum to 1.0
+
+
+```
+
+Now data generation and sample of theta from prior.
+
+```{r}
+
+priorInd<-sample(1:length(Theta),500,replace = T)
+priorSample<-cbind(Theta=Theta[priorInd],Prob=pTheta[priorInd])
+priorSample<-rbind(priorSample,
+                   c(head(Theta,1),head(pTheta,1)),
+                   c(tail(Theta,1),tail(pTheta,1)))
+
+likelihoodVector<-sapply(priorSample[,"Theta"],function(z) likeli(z,data1))
+plot(priorSample[,"Theta"],likelihoodVector)
+
+```
+
+Now posterior.
+
+```{r}
+
+postVector<-priorSample[,"Prob"]*likelihoodVector
+postVector<-postVector/sum(postVector)
+plot(priorSample[,"Theta"],postVector)
+
+postDistr<-approxfun(priorSample[,"Theta"],postVector,method="linear")
+plot(priorSample[,"Theta"],postVector)
+lines(Theta,postDistr(Theta),col="red",lwd=2)
+
+
+```
+
+### Now we have our posterior sample as well.
+
+Mode mean var
+
+```{r}
+
+postDistr1<-postDistr(Theta)
+(mode1<-Theta[which.max(postDistr(Theta))])
+(mean1<-Theta%*%postDistr(Theta)/sum(postDistr(Theta)))
+(var1<-((Theta-mean1)^2)%*%postDistr(Theta)/sum(postDistr(Theta)))
+
+
+```
+
+# Now data generation part 2.
+
+```{r}
+
+set.seed(97)
+pTheta<-postDistr(Theta)/sum(postDistr(Theta))
+# new data generation
+(data2<-rbinom(10,1,.71))
+
+priorInd<-sample(1:length(Theta),500,replace = T)
+priorSample<-cbind(Theta=Theta[priorInd],Prob=pTheta[priorInd])
+priorSample<-rbind(priorSample,
+                   c(head(Theta,1),head(pTheta,1)),
+                   c(tail(Theta,1),tail(pTheta,1)))
+
+likelihoodVector<-sapply(priorSample[,"Theta"],function(z) likeli(z,data2))
+plot(priorSample[,"Theta"],likelihoodVector)
+
+```
+
+New posterior.
+
+```{r}
+
+postVector<-priorSample[,"Prob"]*likelihoodVector
+postVector<-postVector/sum(postVector)
+plot(priorSample[,"Theta"],postVector)
+
+postDistr<-approxfun(priorSample[,"Theta"],postVector,method="linear")
+plot(priorSample[,"Theta"],postVector)
+lines(Theta,postDistr(Theta),col="red",lwd=2)
+
+postDistr2<-postDistr(Theta)
+(mode2<-Theta[which.max(postDistr(Theta))])
+(mean2<-Theta%*%postDistr(Theta)/sum(postDistr(Theta)))
+(var2<-((Theta-mean2)^2)%*%postDistr(Theta)/sum(postDistr(Theta)))
+
+
+```
+
+# Now repeat for the reverse.
+
+### Now data generation and sample of theta from prior using data2
+
+```{r}
+
+priorInd<-sample(1:length(Theta),500,replace = T)
+priorSample<-cbind(Theta=Theta[priorInd],Prob=pTheta[priorInd])
+priorSample<-rbind(priorSample,
+                   c(head(Theta,1),head(pTheta,1)),
+                   c(tail(Theta,1),tail(pTheta,1)))
+
+likelihoodVector<-sapply(priorSample[,"Theta"],function(z) likeli(z,data2))
+plot(priorSample[,"Theta"],likelihoodVector)
+
+```
+
+Now posterior.
+
+```{r}
+
+postVector<-priorSample[,"Prob"]*likelihoodVector
+postVector<-postVector/sum(postVector)
+plot(priorSample[,"Theta"],postVector)
+
+postDistr<-approxfun(priorSample[,"Theta"],postVector,method="linear")
+plot(priorSample[,"Theta"],postVector)
+lines(Theta,postDistr(Theta),col="red",lwd=2)
+
+
+```
+
+Mode mean var
+
+```{r}
+
+postDistr3<-postDistr(Theta)
+(mode3<-Theta[which.max(postDistr(Theta))])
+(mean3<-Theta%*%postDistr(Theta)/sum(postDistr(Theta)))
+(var3<-((Theta-mean3)^2)%*%postDistr(Theta)/sum(postDistr(Theta)))
+
+
+```
+
+# Reupdate with data1 now
+
+```{r}
+
+pTheta<-postDistr(Theta)/sum(postDistr(Theta))
+
+priorInd<-sample(1:length(Theta),500,replace = T)
+priorSample<-cbind(Theta=Theta[priorInd],Prob=pTheta[priorInd])
+priorSample<-rbind(priorSample,
+                   c(head(Theta,1),head(pTheta,1)),
+                   c(tail(Theta,1),tail(pTheta,1)))
+
+likelihoodVector<-sapply(priorSample[,"Theta"],function(z) likeli(z,data1))
+plot(priorSample[,"Theta"],likelihoodVector)
+
+```
+
+New posterior.
+
+```{r}
+
+postVector<-priorSample[,"Prob"]*likelihoodVector
+postVector<-postVector/sum(postVector)
+plot(priorSample[,"Theta"],postVector)
+
+postDistr<-approxfun(priorSample[,"Theta"],postVector,method="linear")
+plot(priorSample[,"Theta"],postVector)
+lines(Theta,postDistr(Theta),col="red",lwd=2)
+
+postDistr4<-postDistr(Theta)
+(mode4<-Theta[which.max(postDistr(Theta))])
+(mean4<-Theta%*%postDistr(Theta)/sum(postDistr(Theta)))
+(var4<-((Theta-mean4)^2)%*%postDistr(Theta)/sum(postDistr(Theta)))
+
+
+```
+
+# Comparison
+
+```{r}
+
+final_comp = rbind(data.frame(mode = mode2,mean = mean2,var = var2),data.frame(mode=mode4,mean = mean4, var = var4))
+
+```

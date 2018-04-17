@@ -1,0 +1,40 @@
+---
+title: "bayes-wk1-hw-kenwan"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('faraway')
+library('dplyr')
+
+```
+
+
+```{r}
+
+data(femsmoke)
+femsmoke
+
+```
+
+Create joint distribution
+
+```{r}
+
+mat.d0<-table(subset(femsmoke,dead=="no")[,1],subset(femsmoke,dead=="no")[,2],subset(femsmoke,dead=="no")[,3])
+mat.d1<-table(filter(femsmoke,dead=="no"))
+
+mat.d0
+mat.d1
+
+joint_dta = femsmoke %>% 
+  group_by(smoker,dead,age) %>% 
+  summarise_all(.,sum)
+
+View(joint_dta)
+
+
+```

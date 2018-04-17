@@ -1,0 +1,204 @@
+---
+title: "wk1-workshop"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+u<-c("u1","u2")
+v<-c("v1","v2","v3")
+w<-c("w1","w2","w3")
+matr.u0<-paste("u0",outer(v,w,paste,sep=","),sep=",")
+dim(matr.u0)<-c(3,3)
+matr.u1<-paste("u1",outer(v,w,paste,sep=","),sep=",")
+dim(matr.u1)<-c(3,3)
+matr.u0
+
+matr.u1
+
+dataPath = "D:/datascience/bayesian/wk1/"
+
+data3way<-read.csv(file=paste(dataPath,"3WayData.csv",sep="/"))
+data3way = read.csv(file.choose())
+
+head(data3way)
+
+```
+
+Data loaded. Now array
+
+```{r}
+mat.u0<-table(subset(data3way,u==0)[,1],subset(data3way,u==0)[,2])
+mat.u1<-table(subset(data3way,u==1)[,1],subset(data3way,u==1)[,2])
+
+mat.u0
+mat.u1
+
+idx.v1<-data3way$v==1
+idx.w1<-data3way$w==1
+idx.u1<-data3way$u==1
+sum(idx.v1*idx.w1*idx.u1) #element (1,1) of mat.u1
+
+idx.v2<-data3way$v==2
+sum(idx.v2*idx.w1*idx.u1) #element (1,2) of mat.u1
+
+idx.w2<-data3way$w==2
+sum(idx.v1*idx.w2*idx.u1) #element (2,1) of mat.u1
+
+colnames(mat.u1)<-colnames(mat.u0)<-c("v1","v2","v3")
+rownames(mat.u1)<-rownames(mat.u0)<-c("w1","w2","w3")
+
+data3way.array<-array(rep(NA,18),dim=c(3,3,2),dimnames=list(paste("w",1:3,sep=""),
+                                                            paste("v",1:3,sep=""),
+                                                            paste("u",0:1,sep="")))
+data3way.array[,,1]<-mat.u0
+data3way.array[,,2]<-mat.u1
+
+data3way.array
+
+N<-sum(data3way.array)
+(data3way.array.p<-data3way.array/N)
+
+uMarginal = apply(data3way.array.p,FUN = sum,MARGIN = 3)
+vMarginal = apply(data3way.array.p,FUN = sum,MARGIN = 2)
+wMarginal = apply(data3way.array.p,FUN = sum,MARGIN = 1)
+
+uMarginal
+vMarginal
+wMarginal
+
+```
+
+So we pulled the marginal distributions for each one. Across both us.
+
+Now the conditional portion.
+
+Create conditional distribution p(w,v|u=1) as matrix cond.v.w.given.u1. So to do this we want to get the prob of w and v (any) given u1.
+
+```{r}
+
+cond.v.w.given.u1 = data3way.array.p[,,"u1"]/uMarginal["u1"]
+cond.v.w.given.u1
+
+```
+
+Create conditional distribution p(v|u=1) as vector cond.v.given.u1
+
+```{r}
+
+cond.v.given.u1 = apply(data3way.array.p[,,"u1"],2,sum)/uMarginal["u1"]
+cond.v.given.u1
+```
+
+Create conditional distribution p(w|v=2,u=1) as vector cond.w.given.u1.v2.
+
+This should be p(w,v=2,u=1) / p(v=2 | u=1)*p(u=1)
+
+```{r}
+pwvu = data3way.array.p[,"v2","u1"]
+uMarginal["u1"]
+
+cond.w.given.u1.v2 = pwvu / (cond.v.given.u1["v2"]*uMarginal["u1"])
+cond.w.given.u1.v2
+
+
+```
+
+SImulation
+
+Let the marginal distribution for random variable u be Bernoulli with p(u=0)=0.55, p(u=1)=0.45.
+Let conditional distributions for random variables (v|u=0) and (v|u=1), taking values 1,2,3 be
+
+```{r}
+
+(pCond.v.given.u0<-c(.7,.2,.1))
+(pCond.v.given.u1<-c(.1,.2,.7))
+
+p.given.u0.v1<-c(.3,.3,.4)
+p.given.u0.v2<-c(.5,.3,.2)
+p.given.u0.v3<-c(.6,.2,.2)
+p.given.u1.v1<-c(.2,.3,.5)
+p.given.u1.v2<-c(.2,.2,.6)
+p.given.u1.v3<-c(.1,.7,.2)
+
+```
+
+Data generation
+
+```{r}
+set.seed(11)
+sim.u = rbinom(n = 500,size = 1,prob = .45)
+
+# generate data based on u value. 
+sim.v = sapply(sim.u,
+       function(z) sample(1:3,1,replace=TRUE,prob=ifelse(rep(z==1,3),pCond.v.given.u1,pCond.v.given.u0)))
+
+simmed_res = data.frame(sim.u,sim.v)
+head(simmed_res)
+
+# BASED ON V  GENERATE
+sim.w = apply(simmed_res,1,
+              function(z) sample(1:3,1,replace=TRUE,
+                                 prob=switch(3*z[1]+z[2],
+                                             p.given.u0.v1,
+                                             p.given.u0.v2,
+                                             p.given.u0.v3,
+                                             p.given.u1.v1,
+                                             p.given.u1.v2,
+                                             p.given.u1.v3)))
+
+simmed_res["sim.w"] = sim.w
+
+head(simmed_res)
+```
+
+EV
+
+Uncond E[V]
+
+```{r}
+
+vMarginal %*% c(1,2,3)
+
+
+```
+
+Conditional E[v|u].
+
+First, find conditional mean values E[v|u=u0]=E[v|u0] and E[v|u=u1]=E[v|u1].
+
+The random variable (v|u0) takes values 1,2,3 with corresponding probabilities p(v=1|u0),p(v=2|u0),p(v=3|u0), given by the vector
+
+```{r}
+
+
+# E[v|u=u0] 
+
+(cond.v.given.u0<-apply(data3way.array.p[,,"u0"],2,sum)/uMarginal["u0"])
+
+# now value
+
+exp.v.given.u0 = c(1,2,3) %*% cond.v.given.u0
+
+# E[v|u=u1]
+
+(cond.v.given.u1<-apply(data3way.array.p[,,"u1"],2,sum)/uMarginal["u1"])
+
+exp.v.given.u1 = c(1,2,3) %*% cond.v.given.u1
+
+# now total.
+
+uMarginal %*% c(exp.v.given.u0,exp.v.given.u1)
+
+```
+
+
+
+
+
