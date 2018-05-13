@@ -1,0 +1,300 @@
+---
+title: "wk6-bayes-hw-kenwan"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rjags)
+dataPath = "D:/datascience/bayesian"
+
+suppressWarnings(source(paste(dataPath,"DBDA2Eprograms/DBDA2E-utilities.R",sep="/")))
+library('rstan')
+
+suppressWarnings(library(quantmod))
+
+# test
+
+fx <- inline::cxxfunction( signature(x = "integer", y = "numeric" ) , '
+	return ScalarReal( INTEGER(x)[0] * REAL(y)[0] ) ;
+' )
+fx( 2L, 5 ) # should be 10
+
+library(HDInterval)
+
+```
+
+# AAPL returns
+
+Using the methods of the workshop estimate parameters of normal model and robust normal model for the Apple returns.
+
+Estimate realized arithmetic volatility of Apple returns using both normal and robust models.
+
+Volatility is calculated as:
+σ=Sd*sqrt(365)
+
+where Sd is standard deviation of daily arithmetic returns S(t)−S(t−1), S(t) is stock price.
+
+```{r}
+
+getSymbols("AAPL", from="2015-1-1",to="2015-12-31")
+
+AAPL.1.day<-as.matrix(AAPL)
+AAPL.returns.2015<-diff(AAPL.1.day[,6])
+
+AAPL.ret<-read.csv(paste(dataPath,"/wk6/AAPL_2015.csv",sep="/"))$x
+
+```
+
+Visualize the distribution of the returns.
+
+```{r}
+
+AAPL.dens<-density(AAPL.returns.2015)
+plot(AAPL.dens)
+lines(AAPL.dens$x,dnorm(AAPL.dens$x,mean(AAPL.ret),sd(AAPL.ret)),col="red")
+
+```
+
+# fit normal model for 1 group with no predictors. 
+
+Prep of data.
+
+```{r}
+
+# Observed sigma.
+(sigma = sd(AAPL.returns.2015)*sqrt(365))
+
+# preparing data
+set.seed(9384756)
+y <- AAPL.returns.2015
+Ntotal = length(y)
+
+dataList = list(
+  y = y ,
+  Ntotal = Ntotal ,
+  mean_mu = mean(y) ,
+  sd_mu = sd(y)
+)
+
+
+```
+
+Let's run it in jAGS.
+
+```{r}
+
+modelString = "
+model {
+  for ( i in 1:Ntotal ) {
+    y[i] ~ dnorm( mu , 1/sigma^2 )
+  }
+  mu ~ dnorm(mean_mu , 1/(100*sd_mu)^2)
+  sigma ~ dunif( sd_mu/1000 , sd_mu*1000 )
+}
+" # close quote for modelString
+# Write out modelString to a text file
+writeLines( modelString , con="TEMPmodel.txt" )
+
+
+```
+
+Init
+
+```{r}
+
+initsList <-function() {
+  upDown<-sample(c(1,-1),1)
+  m <- mean(y)*(1+upDown*.05)
+  s <- sd(y)*(1-upDown*.1) 
+  list( mu = m , sigma = s)
+}
+
+```
+
+Run
+
+```{r}
+
+parameters = c( "mu" , "sigma")     # The parameters to be monitored
+adaptSteps = 500               # Number of steps to "tune" the samplers
+burnInSteps = 1000
+numSavedSteps=50000
+nChains = 4 
+thinSteps = 1
+nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
+  # Create, initialize, and adapt the model:
+
+jagsModel = jags.model( "TEMPmodel.txt" , data=dataList , inits=initsList , 
+                          n.chains=nChains , n.adapt=adaptSteps )
+
+# Burn-in:
+update( jagsModel , n.iter=burnInSteps )
+
+# Run it
+# The saved MCMC chain:
+codaSamples = coda.samples( jagsModel , variable.names=parameters , 
+                          n.iter=nIter , thin=thinSteps )
+
+
+```
+
+Check  
+
+```{r}
+
+summary(codaSamples)
+
+plot(codaSamples)
+
+sd(y)
+
+autocorr.plot(codaSamples,ask=F)
+
+```
+
+SD is closed to the observed and looks significant. Mu is not.
+
+Overall, looks like it had no issues converging, bbut sigma plot does show some slight autocorrelation after lag 1.
+
+More dianostics.
+
+
+```{r}
+
+Ntotal
+effectiveSize(codaSamples)
+
+gelman.plot(codaSamples)
+
+lapply(codaSamples,function(z) hdi(as.matrix(z)))
+
+```
+
+samples
+
+```{r}
+
+head(codaSamples[1])
+
+```
+
+HDI 
+
+```{r}
+
+(HDIofChains<-lapply(codaSamples,function(z) hdi(as.matrix(z))))
+
+
+```
+
+# Now let's repeat with a robust normal.
+
+
+Let's run it in jAGS.
+
+```{r}
+
+modelString = "
+model {
+for ( i in 1:Ntotal ) {
+    y[i] ~ dt(mu,1/sigma^2,nu)
+}
+mu ~ dnorm( mean_mu , 1/(100*sd_mu)^2 )
+sigma ~ dunif( sd_mu/1000 , sd_mu*1000 )
+nu ~ dexp(1/30.0)
+}
+  " # close quote for modelString
+  # Write out modelString to a text file
+writeLines( modelString , con="TEMPmodel.txt" )
+
+```
+
+Init
+
+```{r}
+
+initsList <-function() {
+  upDown<-sample(c(1,-1),1)
+  m <- mean(y)*(1+upDown*.05)
+  s <- sd(y)*(1-upDown*.1) 
+  list( mu = m , sigma = s,nu=2)
+}
+```
+
+Run
+
+```{r}
+
+parameters = c( "mu" , "sigma" , "nu" )     # The parameters to be monitored
+adaptSteps = 500               # Number of steps to "tune" the samplers
+burnInSteps = 1000
+nChains = 3 
+thinSteps = 1
+numSavedSteps=50000
+(nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains ))
+
+# Create, initialize, and adapt the model:
+jagsModel = jags.model( "TEMPmodel.txt" , data=dataList , inits=initsList , 
+                  n.chains=nChains , n.adapt=adaptSteps )
+
+# Burn-in:
+update( jagsModel , n.iter=burnInSteps )
+# The saved MCMC chain:
+codaSamples = coda.samples( jagsModel , variable.names=parameters , 
+                      n.iter=nIter , thin=thinSteps )
+
+
+```
+
+Check  
+
+```{r}
+
+summary(codaSamples)
+
+plot(codaSamples)
+
+sd(y)
+
+autocorr.plot(codaSamples,ask=F)
+
+```
+
+Mu and sigma trace plots look okay.
+
+Autocorrelation does seem like an issue. The lag autocorrelation is quite long (15 or so).
+
+
+```{r}
+
+Ntotal
+effectiveSize(codaSamples)
+
+gelman.plot(codaSamples)
+
+lapply(codaSamples,function(z) hdi(as.matrix(z)))
+
+```
+
+HDI.
+
+Nu HDI is huge!
+
+```{r}
+
+head(codaSamples[1])
+
+```
+
+
+```{r}
+
+(HDIofChains<-lapply(codaSamples,function(z) hdi(as.matrix(z))))
+
+```
+
+Non robust estimate of sigma is inside the HDI for all the chains.

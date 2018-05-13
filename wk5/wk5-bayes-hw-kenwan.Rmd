@@ -1,0 +1,239 @@
+---
+title: "wk4-hw`kenwan`bayes"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rjags)
+dataPath = "D:/datascience/bayesian"
+
+suppressWarnings(source(paste(dataPath,"DBDA2Eprograms/DBDA2E-utilities.R",sep="/")))
+library('rstan')
+
+# test
+
+fx <- inline::cxxfunction( signature(x = "integer", y = "numeric" ) , '
+	return ScalarReal( INTEGER(x)[0] * REAL(y)[0] ) ;
+' )
+fx( 2L, 5 ) # should be 10
+
+```
+
+# Biomial output with two groups
+
+Data are panel data containing columns: sex, race, age, education, state and y.
+The output y is the binary version of the original data.
+It reflects opinion (positive-1, negative-0) about President Barak Obama during his 2012 campaign for reelection.
+
+Consider problem of identifying responses of two gender groups (column sex).
+
+Decide what is the right model and analyze it using JAGS.I'll use stan instead.
+
+Consider different prior distributions.
+
+### Load in data
+
+```{r}
+
+myData = read.csv(paste0(dataPath,"/wk4/MScA_32014_BayesianMethods_CourseProjectData.csv"))
+head(myData)   
+
+dim(myData)
+
+#positive
+unique(myData$y)
+sum(myData$y)
+
+(dataList<-list(y=myData$y,Ntotal=length(myData$y)))
+y<-myData$y
+(Ntotal<-length(y))
+```
+
+# Simple binomial breaks down.
+
+Let's examine then the impact of gender.
+
+```{r}
+
+unique(myData$sex)
+
+#string
+
+y = as.numeric(myData$y)
+s = as.numeric(myData$sex) # ensures consecutive integer levels
+# Do some checking that data make sense:
+
+if ( any( y!=0 & y!=1 ) ) { stop("All y values must be 0 or 1.") }
+Ntotal = length(y)
+Nsubj = length(unique(s))
+
+# Specify the data in a list, for later shipment to JAGS:
+dataList = list(
+  y = y ,
+  s = s ,
+  Ntotal = Ntotal ,
+  Nsubj = Nsubj
+  )
+
+# THE MODEL.
+modelString = "
+data {
+  int<lower=1> Nsubj ;
+  int<lower=1> Ntotal ;
+  int<lower=0,upper=1> y[Ntotal] ;
+  int<lower=1> s[Ntotal] ; // notice Ntotal not Nsubj
+}
+parameters {
+  real<lower=0,upper=1> theta[Nsubj] ; // individual prob correct
+  real<lower=0,upper=1> omega ;        // group mode
+  real<lower=0> kappaMinusTwo ;        // group concentration minus two
+}
+transformed parameters {
+real<lower=0> kappa ;  
+  kappa = kappaMinusTwo + 2 ;
+}
+model {
+  omega ~ beta( 1 , 1 ) ;
+  kappaMinusTwo ~ gamma( 0.01 , 0.01 ) ; // mean=1 , sd=10 (generic vague)
+  // kappaMinusTwo ~ gamma( 1.105125 , 0.1051249 ) ;  # mode=1 , sd=10 
+  theta ~ beta( omega*(kappa-2)+1 , (1-omega)*(kappa-2)+1 ) ; // vectorized
+  for ( i in 1:Ntotal ) {
+    y[i] ~ bernoulli( theta[s[i]] ) ;
+  }
+}
+" # close quote for modelString
+
+
+
+```
+
+Initialize.
+
+```{r}
+
+# INTIALIZE THE CHAINS.
+# Initial values of MCMC chains based on data:
+initsList = function() {
+  thetaInit = rep(0,Nsubj)
+  for ( sIdx in 1:Nsubj ) { # for each subject
+    includeRows = ( s == sIdx ) # identify rows of this subject
+    yThisSubj = y[includeRows]  # extract data of this subject
+    resampledY = sample( yThisSubj , replace=TRUE ) # resample
+    thetaInit[sIdx] = sum(resampledY)/length(resampledY) 
+  }
+  thetaInit = 0.001+0.998*thetaInit # keep away from 0,1
+  meanThetaInit = mean( thetaInit )
+  kappaInit = 100 # lazy, start high and let burn-in find better value
+  return( list( theta=thetaInit , omega=meanThetaInit , 
+                kappaMinusTwo=kappaInit-2 ) )
+}
+
+# RUN THE CHAINS
+parameters = c( "theta","omega","kappa") # The parameters to be monitored
+burnInSteps = 500            # Number of steps to burn-in the chains
+nChains = 4                  # nChains should be 2 or more for diagnostics 
+numSavedSteps=50000
+thinSteps=1
+
+# Translate to C++ and compile to DSO:
+stanDso <- stan_model( model_code=modelString ) 
+
+```
+
+Now run.
+
+```{r}
+
+# Get MC sample of posterior:
+startTime = proc.time()
+stanFit <- sampling( object=stanDso , 
+                       data = dataList , 
+                       #pars = parameters , # optional
+                       chains = nChains ,
+                       iter = ( ceiling(numSavedSteps/nChains)*thinSteps
+                                +burnInSteps ) , 
+                       warmup = burnInSteps , 
+                       thin = thinSteps ,
+                       init = initsList ) # optional  
+
+
+stopTime = proc.time()
+duration = stopTime - startTime
+show(duration)
+
+```
+
+Convergence.
+
+```{r}
+
+show(stanFit)
+
+plot(stanFit)
+
+```
+
+We can see that the theta values arevery well split, with nearly 0 sd in the samples. The same can not be said for the omega and kappa values.
+
+
+```{r}
+rstan::traceplot(stanFit,pars=c("omega","kappa"), ncol=1, inc_warmup=F)
+
+pairs(stanFit, pars=c("omega","kappa"))
+
+```
+
+We can see that the oomega anmd kappa values are not centered well for omega.
+
+```{r}
+
+stan_hist(stanFit)
+
+```
+
+DIfferent visualization, but theta value histograms look like a strong estimate with low sd.
+
+Autocorrelation.
+
+
+```{r}
+
+stan_ac(stanFit, separate_chains = T)
+
+stan_diag(stanFit,information = "sample",chain=0)
+
+
+```
+
+MCMC trajecvtories
+
+
+```{r}
+
+OmegaKappa<-cbind(Omega=rstan::extract(stanFit,pars=c("omega","kappa"))$'omega',
+                  Kappa=rstan::extract(stanFit,pars=c("omega","kappa"))$'kappa')
+
+head(OmegaKappa)
+
+Thetas<-rstan::extract(stanFit,pars=names(stanFit))
+Thetas<-matrix(unlist(Thetas), ncol = 6, byrow = F)
+colnames(Thetas)<-names(stanFit)
+Thetas<-Thetas[,-(3:6)]
+head(Thetas)
+
+```
+
+HDIS
+
+```{r}
+library(HDInterval)
+
+hdi(as.vector(Thetas))
+apply(Thetas,2,function(z) hdi(z))
+
+```
+
