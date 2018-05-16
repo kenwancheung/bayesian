@@ -1,0 +1,460 @@
+---
+title: "wk7-hw-bayes"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rjags)
+dataPath = "D:/datascience/bayesian"
+
+suppressWarnings(source(paste(dataPath,"DBDA2Eprograms/DBDA2E-utilities.R",sep="/")))
+library('rstan')
+
+suppressWarnings(library(quantmod))
+
+# test
+
+fx <- inline::cxxfunction( signature(x = "integer", y = "numeric" ) , '
+	return ScalarReal( INTEGER(x)[0] * REAL(y)[0] ) ;
+' )
+fx( 2L, 5 ) # should be 10
+
+library(HDInterval)
+library(datasets)
+suppressWarnings(library(rstan))
+
+# process in parallel
+library(doParallel) 
+cl <- makeCluster(detectCores()/2, type='PSOCK')
+registerDoParallel(cl)
+
+# turn parallel processing off and run sequentially again:
+# registerDoSEQ()
+
+
+```
+
+## Part 1
+1. Use at least 2 different methods proving that the groups in section 3.3 of part 1 of the workshop are different.
+
+
+```{r}
+
+myDataFrame = read.csv( file=paste(dataPath,"wk7/TwoGroupIQ.csv",sep="/") )
+y = as.numeric(myDataFrame[,"Score"])
+x = as.numeric(as.factor(myDataFrame[,"Group"]))
+(xLevels = levels(as.factor(myDataFrame[,"Group"])))
+
+(Ntotal = length(y))
+# Specify the data in a list, for later shipment to JAGS:
+dataList = list(
+    y = y ,
+    x = x ,
+    Ntotal = Ntotal ,
+    meanY = mean(y) ,
+    sdY = sd(y)
+)
+dataList
+
+```
+
+Model params.
+
+```{r}
+
+# Use the description for Stan from file "ch16_2.stan"
+modelString = "
+data {
+    int<lower=1> Ntotal;
+    int x[Ntotal];
+    real y[Ntotal];
+    real meanY;
+    real sdY;
+}
+transformed data {
+    real unifLo;
+    real unifHi;
+    real normalSigma;
+    real expLambda;
+    unifLo = sdY/1000;
+    unifHi = sdY*1000;
+    normalSigma = sdY*100;
+    expLambda = 1/29.0;
+}
+parameters {
+    real<lower=0> nuMinusOne; //New: definition of additional parameter nu
+    real mu[2];
+    real<lower=0> sigma[2];
+}
+transformed parameters {
+    real<lower=0> nu;           //New: new parameter nu
+    nu=nuMinusOne+1;           //New: shifting nu to avoid zero
+}
+model {
+    sigma ~ uniform(unifLo, unifHi);
+    mu ~ normal(meanY, normalSigma);
+    nuMinusOne~exponential(expLambda);      //New: exponential prior for nu
+    for (i in 1:Ntotal) {
+        y[i] ~ student_t(nu, mu[x[i]], sigma[x[i]]);
+    }
+
+}
+"
+
+```
+
+save
+
+```{r}
+
+stanDsoRobust <- stan_model( model_code=modelString ) 
+save(stanDsoRobust,file=paste(dataPath,"DSORobust1.Rds",sep="/"))
+
+```
+
+run
+
+```{r}
+
+parameters = c( "mu" , "sigma" , "nu" )     # The parameters to be monitored
+adaptSteps = 500               # Number of steps to "tune" the samplers
+burnInSteps = 1000
+nChains = 4 
+thinSteps = 1
+numSavedSteps<-5000
+# Get MC sample of posterior:
+
+stanFitRobust <- sampling( object=stanDsoRobust , 
+                     data = dataList ,
+                     pars=c('nu','mu', 'sigma'),
+                     chains = 3,
+                     cores= 3,
+                     iter = 50000,
+                     warmup = 300, 
+                     thin = 1 )
+
+
+```
+
+save
+
+```{r}
+save(stanFitRobust,file=paste(dataPath,"StanRobustFit2Groups.Rdata",sep="/"))
+# load(paste(dataPath,"StanRobustFit2Groups.Rdata",sep="/"))
+
+
+```
+
+Print
+
+```{r}
+
+print(stanFitRobust)
+
+```
+
+Matches with workshop.
+
+```{r}
+
+dis1<-cbind(Mu=rstan::extract(stanFitRobust,pars="mu[1]")$'mu[1]',
+            Sigma=rstan::extract(stanFitRobust,pars="sigma[1]")$'sigma[1]')
+dis2<-cbind(Mu=rstan::extract(stanFitRobust,pars="mu[2]")$'mu[2]',
+            Sigma=rstan::extract(stanFitRobust,pars="sigma[2]")$'sigma[2]')
+denDis1<-density(dis1[,"Mu"])
+denDis2<-density(dis2[,"Mu"])
+plot(denDis1,col="blue",xlim=c(90,120))
+lines(denDis2,col="green")
+
+```
+
+
+Plots
+
+```{r}
+
+plot(dis1,xlim=c(92,118),ylim=c(5,33),col="red",xlab="Mean",ylab="St. Dev.")
+points(dis2,col="blue")
+
+```
+
+##Two different tests.
+
+Ttest to compare means with different group vars. Reject null here.
+
+```{r}
+
+t.test(dis1[,1],dis2[,1], var.equal=F, paired=FALSE)
+
+```
+
+Test two: let's run a regression to see if the samples have significant impact on mu values.
+
+```{r}
+
+test_dta = data.frame(mu = c(dis1[,1],dis2[,1]),
+                 group = c(rep(1,length(dis1[,1])),rep(2,length(dis2[,1])))
+                 )
+  
+
+head(test_dta)
+
+```
+
+GLM
+
+```{r}
+
+glm1 = glm(mu ~ as.factor(group), data = test_dta)
+summary(glm1)
+
+```
+
+Significant p values! Can see as well 
+
+## Part 2
+2. Analyze convergence of MCMC in section 5.1.4 of part 2 of the workshop, try to adjust parameters and rerun the process to obtain the a better quality of MCMC.
+
+
+```{r}
+df = read.csv(file=paste(dataPath,"wk7/HierLinRegressData.csv",sep="/"))
+head(df)
+
+dataList<-list(Ntotal=length(df$Y),
+               y=df$Y,
+               x=df$X,
+               Ngroups = max(df$Subj),
+               group = df$Subj
+)
+
+```
+
+Model desc 
+
+```{r}
+
+modelStringPanel = "
+data {
+    int<lower=1> Ntotal;
+    vector[Ntotal] y;
+    vector[Ntotal] x;
+    int<lower=1> Ngroups;
+    int<lower=1, upper=Ngroups> group[Ntotal];
+}
+transformed data {
+    real meanY;
+    real sdY;
+    vector[Ntotal] zy; // normalized y
+    real meanX;
+    real sdX;
+    vector[Ntotal] zx; // normalized x
+    meanY = mean(y);
+    sdY = sd(y);
+    zy = (y - meanY) / sdY;
+    meanX = mean(x);
+    sdX = sd(x);
+    zx = (x - meanX) / sdX;
+}
+parameters {
+    real<lower=0> zsigma;
+    real<lower=0> nu;
+    real zbeta0mu;
+    real zbeta1mu;
+    real<lower=0> zbeta0sigma;
+    real<lower=0> zbeta1sigma;
+    vector[Ngroups] zbeta0;
+    vector[Ngroups] zbeta1;
+}
+transformed parameters {
+    real<lower=0> sigma;
+    real beta0mu;
+    real beta1mu;
+    vector[Ngroups] beta0;
+    vector[Ngroups] beta1;
+    // Transform to original scale:
+    sigma = zsigma * sdY;
+    beta0mu = meanY + zbeta0mu * sdY  - zbeta1mu * meanX * sdY / sdX;
+    beta1mu = zbeta1mu * sdY / sdX;
+    beta0 = meanY + zbeta0 * sdY  - zbeta1 * meanX * sdY / sdX; // vectorized
+    beta1 = zbeta1 * sdY / sdX;                                 // vectorized
+}
+model {
+    zsigma ~ uniform(0.001, 1000);
+    nu ~ exponential(1/30.0);
+    zbeta0mu ~ normal(0, 10.0^2);
+    zbeta1mu ~ normal(0, 10.0^2);
+    zbeta0sigma ~ uniform(0.001, 1000);
+    zbeta1sigma ~ uniform(0.001, 1000);
+    zbeta0 ~ normal(zbeta0mu, zbeta0sigma);  // vectorized
+    zbeta1 ~ normal(zbeta1mu, zbeta1sigma);  // vectorized
+    for (i in 1:Ntotal) {
+        zy[i] ~ student_t(1+nu, zbeta0[group[i]] + zbeta1[group[i]] * x[i], zsigma);
+    }
+}"
+
+```
+
+Run
+
+```{r}
+
+stanDsoRobustRegPanel <- stan_model( model_code=modelStringPanel ) 
+
+fit <- sampling (stanDsoRobustRegPanel, 
+                 data=dataList, 
+                 pars=c('nu', 'sigma', 'beta0mu', 'beta1mu', 'beta0', 'beta1', 
+                        'zbeta0sigma', 'zbeta1sigma'),
+                 iter=5000, 
+                 chains = 4, cores = 4
+                 )
+
+# pairs
+pairs(fit, pars=c('nu', 'sigma', 'beta0mu', 'beta1mu'))
+
+```
+
+Pairs plot shows high cor between betas.
+
+### improving convergence
+
+Increase adaptive delta.
+
+```{r}
+
+fit <- sampling (stanDsoRobustRegPanel, 
+                 data=dataList, 
+                 pars=c('nu', 'sigma', 'beta0mu', 'beta1mu', 'beta0', 'beta1', 
+                        'zbeta0sigma', 'zbeta1sigma'),
+                 iter=50000, 
+                 chains = 4, cores = 4,
+                 control = list(adapt_delta = 0.999, stepsize = 0.01, max_treedepth = 15)
+                 )
+
+pairs(fit, pars=c('nu', 'sigma', 'beta0mu', 'beta1mu'))
+
+```
+
+Still a lot of divergent points with a small step size and lhigh adapt_delta. 
+
+```{r}
+
+save(fit,file=paste(dataPath,"fitPanelModifControl11152016.Rdata",sep="/"))
+
+```
+
+## Part 3
+3. Consider data state.x77 from datasets used in multiple regression example in Statistical Analysis (MScA 31007).
+
+Using LifeExp as response fit Gaussian and robust non-hierarchical regression models using Bayesian approach.
+
+```{r}
+
+
+dta<-as.data.frame(state.x77)
+colnames(dta)[4]<-"LifeExp"
+colnames(dta)[6]<-"HSGrad"
+
+head(dta)
+dim(dta)
+
+```
+
+Let's do a simple regression.
+
+```{r}
+
+## Create Stan data
+dat <- list(N        = nrow(dta),
+            p        = 8,
+            Population  = dta$Population,
+            Income     = dta$Income,
+            Illiteracy      = dta$Illiteracy,
+            Murder      = dta$Murder,
+            HSGrad     = dta$HSGrad,
+            Frost = dta$Frost,
+            Area     = dta$Area,
+            LifeExp = dta$LifeExp
+
+            )
+
+
+```
+
+Model text.
+
+```{r}
+modelStringPanel = "
+
+data {
+   // Define variables in data
+   // Number of observations (an integer)
+   int<lower=0> N;
+   // Number of parameters
+   int<lower=0> p;
+   // Variables
+   real LifeExp[N];
+   real  Population[N];
+   real  Income[N];
+   real Illiteracy[N];
+   real  Murder[N];
+   real HSGrad[N];
+   real  Frost[N];
+   real Area[N];
+
+ }
+
+ parameters {
+   // Define parameters to estimate
+   real beta[p];
+
+   // standard deviation (a positive real number)
+   real<lower=0> sigma;
+ }
+
+ transformed parameters  {
+   // Mean
+   real mu[N];
+ for (i in 1:N) {
+     mu[i] <- beta[1] + beta[2]*Population[i] + beta[3]*Income[i] + beta[4]*Illiteracy[i] + beta[5]*Murder[i] + beta[6]*HSGrad[i] + beta[7]*Frost[i] + beta[8]*Area[i];
+   }
+ }
+
+ model {
+   // Prior part of Bayesian inference (flat if unspecified)
+
+   // Likelihood part of Bayesian inference
+     LifeExp ~ normal(mu, sigma);
+ }
+
+"
+
+```
+
+
+```{r}
+
+## Run Stan
+resStan = stan(model_code = modelStringPanel, data = dat,
+                chains = 3, iter = 3000, warmup = 500, thin = 10)
+
+## Show traceplot
+traceplot(resStan, pars = c("beta","sigma"), inc_warmup = TRUE)
+
+#
+print(resStan)
+resStan@model_pars
+```
+
+Checking plot
+
+```{r}
+
+plot(resStan,pars=c('beta', 'sigma', 'mu'))
+
+```
